@@ -24,9 +24,38 @@ To deploy this whole repository (for example your fork) and not the button's cop
 **Root Directory** to `template`. Nothing else: the blog's build first builds the local package
 (`template/scripts/build-local-package.mjs`).
 
+## Deploy the blog to Cloudflare
+
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/nano133-com/nano-unlock-next/tree/main/template)
+
+The button copies the blog into your own Git account and makes a Cloudflare Worker from it, with the
+[OpenNext adapter](https://opennext.js.org/cloudflare). It asks for the two secrets, `NANO_ADDRESS` and
+`UNLOCK_SECRET`; the link carries no value. By hand, in a copy of `template/`:
+
+```sh
+npm install
+npx wrangler secret put NANO_ADDRESS     # your own Nano address
+npx wrangler secret put UNLOCK_SECRET    # a long random text: openssl rand -base64 48
+npm run deploy                            # builds with OpenNext and deploys the Worker
+```
+
+`npm run preview` runs the same Worker on your own computer (put the two settings in a file `.dev.vars` first).
+
+What is different on Cloudflare Workers:
+
+- **Use `@nano133/unlock` 0.1.1 or newer.** Version 0.1.0 cannot check a payment on Workers.
+- **Next.js 16.3.8.** The template pins it: the OpenNext adapter (1.20.10) does not yet run Next.js 16.4.0.
+- **Set your own node if you can (`NANO_NODE_URL`).** Every Worker in the world reaches the default node
+  from one shared address, so all sites on Cloudflare share its limit of about 120 calls a minute. A paying
+  reader costs about 24 calls a minute.
+- **The site's own limits are weaker.** A Worker has many short instances, and each counts for itself. Use a
+  Cloudflare rate limiting rule for `/api/unlock/*` if you need a true limit.
+- The settings must be **secrets** of the Worker. `wrangler.jsonc` sets `nodejs_compat` and a compatibility
+  date after 2025-04-01, which the settings need.
+
 ## Add it to your own Next.js site
 
-Next.js 15 or 16 (App Router), Node.js 20.9 or newer.
+Next.js 15 or 16 (App Router), Node.js 20.9 or newer; on Vercel, on your own server, or on Cloudflare Workers.
 
 1. Install the package.
 
@@ -147,6 +176,7 @@ Limits to know:
 ```sh
 npm install
 npm test          # the payment check, the checkout and the pass, against a mock node on this machine
+npm run test:workers   # the same route code on the Cloudflare Workers runtime, on this machine (no account)
 npm run typecheck
 npm run dev       # the blog on http://localhost:3000 (it shows the setup page until .env.local is filled in)
 ```

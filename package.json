@@ -1,11 +1,15 @@
 {
   "name": "nano133-unlock",
   "private": true,
-  "workspaces": ["packages/*", "template"],
+  "workspaces": [
+    "packages/*",
+    "template"
+  ],
   "scripts": {
     "build": "npm run build -w @nano133/unlock",
     "typecheck": "npm run typecheck -w @nano133/unlock && npm run typecheck -w nano-unlock-blog",
     "test": "npm test -w @nano133/unlock",
-    "dev": "npm run build && npm run dev -w nano-unlock-blog"
+    "dev": "npm run build && npm run dev -w nano-unlock-blog",
+    "test:workers": "npm run build && node --experimental-strip-types packages/unlock/test/workerd/run.mts"
   }
 }

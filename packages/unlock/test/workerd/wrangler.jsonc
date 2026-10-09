@@ -1,0 +1,1 @@
+{ "name": "unlock-core-test", "main": "worker.mjs", "compatibility_date": "2025-10-01", "compatibility_flags": ["nodejs_compat"] }

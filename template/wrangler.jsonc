@@ -1,0 +1,17 @@
+// Cloudflare Workers, by the OpenNext adapter (`npm run preview`, `npm run deploy`). Vercel does not read this file.
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "nano-unlock-blog",
+  "main": ".open-next/worker.js",
+  // `process.env` holds the settings only with `nodejs_compat` and a date of 2025-04-01 or later.
+  "compatibility_date": "2025-10-01",
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  "assets": {
+    "directory": ".open-next/assets",
+    "binding": "ASSETS"
+  },
+  // The two settings are secrets, not `vars`: NANO_ADDRESS and UNLOCK_SECRET (the names are in .env.example;
+  // the "Deploy to Cloudflare" button asks for each). Set them with `npx wrangler secret put <NAME>`, or in the
+  // dashboard: Workers & Pages → the Worker → Settings → Variables and Secrets.
+  "observability": { "enabled": true }
+}

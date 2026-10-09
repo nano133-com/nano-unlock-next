@@ -5,6 +5,8 @@ Nano address** directly, and **your site** checks the payment at a Nano node. No
 in between. The package never holds a key or any money, and it needs no database.
 
 - Next.js 15 or 16 (App Router), React 19, Node.js 20.9 or newer.
+- Runs on Vercel, on your own Node.js server, and on Cloudflare Workers with the OpenNext adapter (0.1.1 or
+  newer; the repository's README has the Cloudflare steps and limits).
 - A ready blog with a "Deploy to Vercel" button: <https://github.com/nano133-com/nano-unlock-next>
 
 ## 5 minutes to a paid article

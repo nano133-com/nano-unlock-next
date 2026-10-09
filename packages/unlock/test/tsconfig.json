@@ -1,5 +1,14 @@
 {
   "extends": "../tsconfig.json",
-  "compilerOptions": { "rootDir": "..", "noEmit": true },
-  "include": [".", "../src"]
+  "compilerOptions": {
+    "rootDir": "..",
+    "noEmit": true
+  },
+  "include": [
+    ".",
+    "../src"
+  ],
+  "exclude": [
+    "workerd/worker.mjs"
+  ]
 }

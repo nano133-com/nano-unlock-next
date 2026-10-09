@@ -6,3 +6,7 @@ next-env.d.ts
 .env.local
 *.tsbuildinfo
 AGENTS.md
+.open-next
+.wrangler
+.dev.vars
+cloudflare-env.d.ts
