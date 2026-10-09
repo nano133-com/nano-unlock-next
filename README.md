@@ -129,6 +129,9 @@ Limits to know:
 - A pass is a cookie of one browser. A person who copies it has the same access until it ends. The same is
   true for a copied checkout or finish-later link together with its payment.
 - There is no pass link for a second device in this version.
+- **The finish-later link opens the paid part for anyone who has it,** once its payment is on the network,
+  for the 24 hours of its checkout. The signed checkout is after the `#`: it is not sent to a server and is
+  in no referrer, but a script on your page can read it.
 - Only a new `UNLOCK_SECRET` ends a pass early, and it ends every pass.
 - The site keeps no list of sales. Your wallet's history is the record.
 - The site has no shared count of requests, so its own limits are best-effort (one count for each running

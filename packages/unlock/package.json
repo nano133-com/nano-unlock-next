@@ -1,13 +1,29 @@
 {
   "name": "@nano133/unlock",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "Sell part of a page for a few cents in Nano (XNO). The reader pays your own address; your site checks the payment at a Nano node. No key on your server, no database.",
+  "keywords": [
+    "nano",
+    "xno",
+    "paywall",
+    "micropayments",
+    "nextjs",
+    "vercel",
+    "unlock"
+  ],
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nano133-com/nano-unlock-next.git",
+    "directory": "packages/unlock"
+  },
+  "homepage": "https://github.com/nano133-com/nano-unlock-next#readme",
   "type": "module",
-  "private": true,
   "sideEffects": false,
   "files": [
-    "dist"
+    "dist",
+    "README.md",
+    "LICENSE"
   ],
   "exports": {
     ".": {
@@ -24,13 +40,17 @@
     }
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p test/tsconfig.json --noEmit",
-    "test": "node --test --experimental-strip-types test/*.test.ts"
+    "test": "node --test --experimental-strip-types test/*.test.ts",
+    "prepack": "npm run build"
+  },
+  "dependencies": {
+    "qrcode-generator": "^2.0.4"
   },
   "peerDependencies": {
-    "next": ">=15",
-    "react": ">=19"
+    "next": ">=15 <17",
+    "react": ">=19 <20"
   },
   "peerDependenciesMeta": {
     "next": {
@@ -50,13 +70,7 @@
   "engines": {
     "node": ">=20.9"
   },
-  "dependencies": {
-    "qrcode-generator": "^2.0.4"
-  },
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/nano133-com/nano-unlock-next.git",
-    "directory": "packages/unlock"
-  },
-  "homepage": "https://github.com/nano133-com/nano-unlock-next#readme"
+  "publishConfig": {
+    "access": "public"
+  }
 }
