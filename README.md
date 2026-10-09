@@ -4,8 +4,7 @@ Sell part of a page for a few cents in Nano (XNO). The reader pays **your own Na
 **your site** checks the payment at a Nano node. There is no account, no card and no service in between. The
 package never holds a key or any money, and it needs no database.
 
-> **Status: in development.** The payment check and the pass are built and tested. The checkout (the amount,
-> the QR code, the wait) is not switched on yet, so this build takes no payment. Nothing is published to npm.
+> **Status: version 0, before its first release.** Nothing is published to npm yet.
 
 This repository holds:
 
@@ -16,19 +15,10 @@ This repository holds:
 
 ## Deploy the blog to Vercel
 
-<!-- DEPLOY BUTTON: this needs the public repository's address, which does not exist yet. When it does, put
-     the button here. The link's form (Vercel docs, "Deploy Button"):
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fnano133-com%2Fnano-unlock-next%2Ftree%2Fmain%2Ftemplate&project-name=nano-unlock-blog&repository-name=nano-unlock-blog&env=NANO_ADDRESS,UNLOCK_SECRET&envDescription=Your%20own%20Nano%20address%2C%20and%20a%20long%20random%20secret&envLink=https%3A%2F%2Fgithub.com%2Fnano133-com%2Fnano-unlock-next%23settings)
 
-     https://vercel.com/new/clone?repository-url=<REPOSITORY URL>/tree/main/template
-       &project-name=nano-unlock-blog&repository-name=nano-unlock-blog
-       &env=NANO_ADDRESS,UNLOCK_SECRET
-       &envDescription=Your%20Nano%20address%20and%20a%20long%20random%20secret
-       &envLink=<REPOSITORY URL>%23settings
-
-     The link must never carry a value for a setting. -->
-
-*The "Deploy to Vercel" button comes here when the repository is public.* It copies the blog into your own
-Git account, asks for the two settings below, and builds the site.
+The button copies the blog into your own Git account, asks for the two settings below, and builds the site.
+The link carries no value for a setting: you type both yourself.
 
 ## Add it to your own Next.js site
 
@@ -99,6 +89,32 @@ A block unlocks a paid part only when the node says all of this about it:
 A block's hash is only a place to look. Every fact comes from the node's own answer for that block. When a node
 does not answer, nothing is unlocked. With two nodes, both must agree.
 
+## How one address serves every reader
+
+1. **The offer.** The page carries a signed offer: the item and its price. The reader cannot change the price.
+   An offer is good for 15 minutes; an older page loads again by itself.
+2. **The checkout.** The site turns the price into XNO at the current rate (the median of three public
+   feeds), rounds it up to Ӿ0.0001, and adds a random **tail** below 10^20 raw (at most Ӿ0.0000000001). That
+   exact amount tells this payment from every other, so no memo and no database is needed. The checkout is a
+   signed text in an httpOnly cookie of the reader's browser.
+3. **The pay step.** The reader gets a QR code and an "Open in wallet" link, which fill in the exact amount.
+   **A typed amount or an exchange's withdrawal cannot send it: readers pay from a wallet.** The page asks
+   the site every 5 seconds; the site asks the node (2 calls for each question).
+4. **15 minutes, 24 hours.** The pay step is shown for 15 minutes. After that the page removes the amount,
+   the QR code and the wallet button. A payment still counts for 24 hours from the checkout's start: the
+   reader opens the article again in the same browser, or presses "I paid: check again".
+5. **Finish later.** The pay step offers a link that holds the signed checkout. It works in another browser
+   too. With it, a reader can also paste the payment's block hash from the wallet.
+6. **The pass.** A paid checkout gives a pass for its item. A second question about the same checkout gives
+   the same pass.
+
+### A payment with no unlock
+
+It can happen: a payment later than 24 hours, a wrong amount, a browser that lost its cookies with no
+finish-later link kept, or an address that received more than 50 payments inside one checkout's time (the
+node lists 50). **The package holds no key, so it cannot send money back.** You see every payment in your
+wallet: settle such a case by hand, from your wallet.
+
 ## The pass
 
 After a payment the reader's browser holds a pass: a signed, httpOnly cookie that names the item and its end
@@ -107,16 +123,20 @@ newest passes that fit in 2,800 bytes.
 
 Limits to know:
 
-- A pass is a cookie of one browser. A person who copies it has the same access until it ends.
+- A pass is a cookie of one browser. A person who copies it has the same access until it ends. The same is
+  true for a copied checkout or finish-later link together with its payment.
+- There is no pass link for a second device in this version.
 - Only a new `UNLOCK_SECRET` ends a pass early, and it ends every pass.
 - The site keeps no list of sales. Your wallet's history is the record.
+- The site has no shared count of requests, so its own limits are best-effort (one count for each running
+  instance). Use your host's rate limit for `/api/unlock/*` if you need a true one.
 - Nobody can stop a reader from copying text that they unlocked.
 
 ## Develop
 
 ```sh
 npm install
-npm test          # the payment check and the pass, against a mock node on this machine
+npm test          # the payment check, the checkout and the pass, against a mock node on this machine
 npm run typecheck
 npm run dev       # the blog on http://localhost:3000 (it shows the setup page until .env.local is filled in)
 ```

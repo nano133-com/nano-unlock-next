@@ -51,6 +51,22 @@ test("a forged or changed pass is refused", async () => {
   for (const token of bad) assert.equal(await hasPass(SECRET, token, "post-1", START), false, token.slice(0, 30));
 });
 
+test("a signature has one text only: another last character with the same bytes is refused", async () => {
+  const ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+  for (let i = 0; i < 20; i++) {
+    const good = await pass("post-1", START, `c${i}`);
+    // The 43rd character of a 32-byte signature holds 4 bits; the 2 spare bits give 3 other texts of the same bytes.
+    const last = ALPHABET.indexOf(good.at(-1)!);
+    for (const other of [last ^ 1, last ^ 2, last ^ 3]) {
+      const twin = good.slice(0, -1) + ALPHABET[other];
+      assert.deepEqual(Buffer.from(twin.split(".")[1]!, "base64url"), Buffer.from(good.split(".")[1]!, "base64url"));
+      assert.equal(await hasPass(SECRET, twin, "post-1", START), false);
+    }
+    assert.equal(await hasPass(SECRET, good, "post-1", START), true);
+    assert.equal(await hasPass(SECRET, `${good}=`, "post-1", START), false);
+  }
+});
+
 test("a text of another kind is never a pass, with the same secret and the same claims", async () => {
   const end = START / 1000 + 3600;
   for (const kind of ["offer", "checkout"] as const) {

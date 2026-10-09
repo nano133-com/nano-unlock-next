@@ -6,19 +6,57 @@
   "type": "module",
   "private": true,
   "sideEffects": false,
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "exports": {
-    ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" },
-    "./next": { "types": "./dist/next/index.d.ts", "import": "./dist/next/index.js" },
-    "./client": { "types": "./dist/next/client.d.ts", "import": "./dist/next/client.js" }
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./next": {
+      "types": "./dist/next/index.d.ts",
+      "import": "./dist/next/index.js"
+    },
+    "./client": {
+      "types": "./dist/next/client.d.ts",
+      "import": "./dist/next/client.js"
+    }
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p test/tsconfig.json --noEmit",
     "test": "node --test --experimental-strip-types test/*.test.ts"
   },
-  "peerDependencies": { "next": ">=15", "react": ">=19" },
-  "peerDependenciesMeta": { "next": { "optional": true }, "react": { "optional": true } },
-  "devDependencies": { "@types/node": "^22", "@types/react": "^19", "next": "^16.4.0", "react": "^19.2.0", "typescript": "^5.9.0" },
-  "engines": { "node": ">=20.9" }
+  "peerDependencies": {
+    "next": ">=15",
+    "react": ">=19"
+  },
+  "peerDependenciesMeta": {
+    "next": {
+      "optional": true
+    },
+    "react": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@types/node": "^22",
+    "@types/react": "^19",
+    "next": "^16.4.0",
+    "react": "^19.2.0",
+    "typescript": "^5.9.0"
+  },
+  "engines": {
+    "node": ">=20.9"
+  },
+  "dependencies": {
+    "qrcode-generator": "^2.0.4"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nano133-com/nano-unlock-next.git",
+    "directory": "packages/unlock"
+  },
+  "homepage": "https://github.com/nano133-com/nano-unlock-next#readme"
 }

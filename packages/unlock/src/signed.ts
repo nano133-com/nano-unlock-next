@@ -80,6 +80,8 @@ export async function verify<T extends object>(secret: string, kind: Kind, token
   const mac = unb64url(parts[1]);
   const body = unb64url(parts[0]);
   if (!mac || !body) return null;
+  // One text for one signature: a last character with other spare bits decodes to the same bytes, and is refused.
+  if (b64url(mac) !== parts[1] || b64url(body) !== parts[0]) return null;
   // `verify` compares in constant time.
   if (!(await crypto.subtle.verify("HMAC", await keyFor(secret, kind), mac as BufferSource, enc.encode(parts[0])))) return null;
   try {
