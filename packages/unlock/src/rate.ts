@@ -1,5 +1,5 @@
-// The XNO/USD rate: the median of the public feeds that answer, so one bad feed cannot move it.
-// Taken from @nano133/checkout (rate.ts).
+// The XNO/USD rate: the median of the public feeds that answer, and only when two feeds agree, so one wrong
+// feed cannot set the price. Taken from @nano133/checkout (rate.ts), plus the rule of two.
 
 type Feed = { name: string; url: string; read: (j: any) => unknown };
 
@@ -14,7 +14,10 @@ const SANE = { min: 0.05, max: 100 };
 
 export type Rate = { usd: number; sources: string[] };
 
-/** Dollars for one XNO, or null when no feed gives a believable rate. */
+/** Two feeds agree when they differ by this much or less. */
+const AGREE = 1.1;
+
+/** Dollars for one XNO, or null when fewer than two feeds give a believable rate that agrees with another. */
 export async function xnoUsdRate(fetchFn: typeof fetch = globalThis.fetch): Promise<Rate | null> {
   const results = await Promise.allSettled(
     FEEDS.map(async (s) => Number(s.read(await (await fetchFn(s.url, { signal: AbortSignal.timeout(6000), cache: "no-store" })).json()))),
@@ -23,8 +26,10 @@ export async function xnoUsdRate(fetchFn: typeof fetch = globalThis.fetch): Prom
     .map((r, i) => ({ name: FEEDS[i]!.name, v: r.status === "fulfilled" ? r.value : NaN }))
     .filter((x) => Number.isFinite(x.v) && x.v >= SANE.min && x.v <= SANE.max)
     .sort((a, b) => a.v - b.v);
-  if (!good.length) return null;
-  return { usd: good[Math.floor(good.length / 2)]!.v, sources: good.map((g) => g.name) };
+  // The feeds that have a neighbour within 10%: a lone feed, or one far from the others, is left out.
+  const agreed = good.filter((g, i) => (i > 0 && g.v / good[i - 1]!.v <= AGREE) || (i < good.length - 1 && good[i + 1]!.v / g.v <= AGREE));
+  if (agreed.length < 2) return null;
+  return { usd: agreed[Math.floor(agreed.length / 2)]!.v, sources: agreed.map((g) => g.name) };
 }
 
 const FRESH_MS = 5 * 60_000;

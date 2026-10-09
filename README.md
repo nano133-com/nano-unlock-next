@@ -68,6 +68,7 @@ cookies, so Next.js renders the page for each request and does not store one rea
 | `UNLOCK_SECRET` | Yes | A long random text that only your site knows (32 characters or more). It signs the readers' passes. Make one with `openssl rand -base64 48`. |
 | `NANO_NODE_URL` | No | The Nano node that proves the payments. Default: `https://node.nano133.com/rpc`. Use your own node if you have one: its answers decide what your site unlocks. |
 | `NANO_NODE_URL_2` | No | A second node. With it, a payment counts only when both nodes confirm the same send. |
+| `UNLOCK_CLAIMS_PER_MINUTE` | No | How many times a minute one running instance may ask the node about a checkout. Default: 50 (2 node calls each; the default node allows about 120 calls a minute for one address). Set it higher with your own node. |
 
 **There is no default address, and this repository holds no address.** With a setting absent or wrong, the
 blog shows a setup page that names the setting, and `<Unlock>` shows a notice in place of the button. No
@@ -93,8 +94,8 @@ does not answer, nothing is unlocked. With two nodes, both must agree.
 
 1. **The offer.** The page carries a signed offer: the item and its price. The reader cannot change the price.
    An offer is good for 15 minutes; an older page loads again by itself.
-2. **The checkout.** The site turns the price into XNO at the current rate (the median of three public
-   feeds), rounds it up to Ӿ0.0001, and adds a random **tail** below 10^20 raw (at most Ӿ0.0000000001). That
+2. **The checkout.** The site turns the price into XNO at the current rate (three public feeds; two must
+   agree within 10%, so one wrong feed sets no price), rounds it up to Ӿ0.0001, and adds a random **tail** below 10^20 raw (at most Ӿ0.0000000001). That
    exact amount tells this payment from every other, so no memo and no database is needed. The checkout is a
    signed text in an httpOnly cookie of the reader's browser.
 3. **The pay step.** The reader gets a QR code and an "Open in wallet" link, which fill in the exact amount.
@@ -103,15 +104,17 @@ does not answer, nothing is unlocked. With two nodes, both must agree.
 4. **15 minutes, 24 hours.** The pay step is shown for 15 minutes. After that the page removes the amount,
    the QR code and the wallet button. A payment still counts for 24 hours from the checkout's start: the
    reader opens the article again in the same browser, or presses "I paid: check again".
-5. **Finish later.** The pay step offers a link that holds the signed checkout. It works in another browser
-   too. With it, a reader can also paste the payment's block hash from the wallet.
+5. **Finish later.** The pay step offers a link: the page's own address, then `#nano-unlock=` and the signed
+   checkout. It works in another browser too. Opening it changes nothing: the page only asks the site if
+   that checkout is paid. With it, a reader can also paste the payment's block hash from the wallet.
 6. **The pass.** A paid checkout gives a pass for its item. A second question about the same checkout gives
    the same pass.
 
 ### A payment with no unlock
 
-It can happen: a payment later than 24 hours, a wrong amount, a browser that lost its cookies with no
-finish-later link kept, or an address that received more than 50 payments inside one checkout's time (the
+It can happen: a payment later than 24 hours, a wrong amount, a page that was closed with no finish-later
+link kept in a browser that lost its cookies, an eleventh checkout in 24 hours in one browser (the cookie
+keeps 10), or an address that received more than 50 payments inside one checkout's time (the
 node lists 50). **The package holds no key, so it cannot send money back.** You see every payment in your
 wallet: settle such a case by hand, from your wallet.
 

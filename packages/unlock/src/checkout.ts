@@ -27,8 +27,8 @@ export const PAY_MS = 15 * 60_000;
 /** A payment counts for this long after the checkout's start. The signed checkout and its cookie live as long. */
 export const LIFE_MS = 24 * 3600_000;
 export const CHECKOUT_COOKIE = "nano_unlock_co";
-/** The cookie keeps this many open checkouts, the newest first. */
-export const CHECKOUTS_KEPT = 6;
+/** The cookie keeps this many open checkouts, the newest first (about 2.5 KB of the 4 KB that a cookie may have). */
+export const CHECKOUTS_KEPT = 10;
 const SEPARATOR = "~";
 
 type RandomBytes = (bytes: Uint8Array) => unknown;
@@ -84,7 +84,7 @@ export type OpenCheckout = {
   uri: string;
   /** Until when the pay step is shown (milliseconds since 1970). */
   payUntil: number;
-  /** The signed checkout, for a "finish later" link. It holds no secret. */
+  /** The signed checkout. The page sends it with each question, and puts it in the "finish later" link. It holds no secret. */
   token: string;
 };
 
@@ -106,7 +106,11 @@ export async function readCheckouts(secret: string, cookie: string | null | unde
   return found.sort((a, b) => b.from - a.from);
 }
 
-/** The cookie's new value: `token` first, then the other valid checkouts, CHECKOUTS_KEPT at most. */
+/**
+ * The cookie's new value: `token` first, then the other valid checkouts, CHECKOUTS_KEPT at most. Only
+ * `startCheckout` calls it, with a checkout that this browser just started: a checkout from outside (a link)
+ * never enters the cookie, so it can neither push a reader's own checkout out nor become a pay step.
+ */
 export async function addCheckout(secret: string, cookie: string | null | undefined, token: string, now = Date.now()): Promise<string> {
   const all = await readCheckouts(secret, [token, ...split(cookie)].join(SEPARATOR), now);
   const first = all.find((c) => c.token === token);

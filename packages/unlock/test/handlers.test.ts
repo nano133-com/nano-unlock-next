@@ -72,25 +72,26 @@ test("start, pay, claim: the pass arrives with the answer 'paid', in an httpOnly
   assert.equal(c.payUntil, START + PAY_MS);
   assert.equal(started.json.now, START);
   assert.match(b.jar.get(CHECKOUT_COOKIE)!.line, /Path=\/api\/unlock; Max-Age=86400; HttpOnly; SameSite=Lax/);
-  assert.equal("token" in c, false);
+  assert.equal(typeof c.token, "string");
 
   clock = START + MIN;
-  const waiting = await b.send("POST", "claim", { body: { item: "post-1", id: c.id } });
+  const waiting = await b.send("POST", "claim", { body: { item: "post-1", co: c.token } });
   assert.equal(waiting.json.state, "waiting");
   assert.equal(waiting.json.checkout.id, c.id);
   assert.equal(b.jar.has(PASS_COOKIE), false);
 
   pay(c.amount);
-  const paid = await b.send("POST", "claim", { body: { item: "post-1", id: c.id } });
+  const paid = await b.send("POST", "claim", { body: { item: "post-1", co: c.token } });
   assert.deepEqual(paid.json, { state: "paid" });
   const pass = b.jar.get(PASS_COOKIE)!;
   assert.match(pass.line, /Path=\/; Max-Age=\d+; HttpOnly; SameSite=Lax/);
   assert.equal(await hasPass(SECRET, pass.value, "post-1", clock), true);
   assert.equal(await hasPass(SECRET, pass.value, "post-2", clock), false);
 
-  // Another browser, with no checkout cookie, gets nothing from that payment.
+  // Another browser, with no checkout cookie and no signed checkout, gets nothing from that payment.
   const other = browser();
   assert.equal((await other.send("POST", "claim", { body: { item: "post-1", id: c.id } })).json.state, "none");
+  assert.equal((await other.send("POST", "claim", { body: { item: "post-1", co: "forged.text" } })).json.state, "expired");
   assert.equal(other.jar.has(PASS_COOKIE), false);
 });
 
@@ -100,7 +101,7 @@ test("a second item adds a second pass and keeps the first", async () => {
   for (const item of ["post-1", "post-2"]) {
     const c = (await b.send("POST", "start", { body: { offer: await offer(item) } })).json.checkout;
     pay(c.amount);
-    assert.equal((await b.send("POST", "claim", { body: { item, id: c.id } })).json.state, "paid");
+    assert.equal((await b.send("POST", "claim", { body: { item, co: c.token } })).json.state, "paid");
   }
   const value = b.jar.get(PASS_COOKIE)!.value;
   assert.equal(await hasPass(SECRET, value, "post-1", clock), true);
@@ -120,32 +121,121 @@ test("a page that opens later finds the late payment of an older checkout", asyn
   assert.equal((await b.send("POST", "claim", { body: { item: "post-1" } })).json.state, "paid");
 });
 
-test("the finish-later link puts the checkout into another browser, and a pasted hash unlocks there", async () => {
+test("a payment of an old amount is found without a reload: the question for all checkouts", async () => {
+  clock = START;
+  const b = browser();
+  const first = (await b.send("POST", "start", { body: { offer: await offer("post-1") } })).json.checkout;
+  clock = START + 20 * MIN;
+  const second = (await b.send("POST", "start", { body: { offer: await offer("post-1") } })).json.checkout;
+  clock = START + 21 * MIN;
+  pay(first.amount);
+  // The page's normal question names its own (new) checkout: not paid.
+  assert.equal((await b.send("POST", "claim", { body: { item: "post-1", co: second.token } })).json.state, "waiting");
+  // Each fifth question, and "I paid", ask for all of the browser's checkouts of the item.
+  assert.equal((await b.send("POST", "claim", { body: { item: "post-1", co: second.token, all: true } })).json.state, "paid");
+});
+
+test("the page's own signed checkout is enough: a lost cookie does not hide a payment", async () => {
   clock = START;
   const b = browser();
   const c = (await b.send("POST", "start", { body: { offer: await offer("post-1") } })).json.checkout;
-  assert.match(c.finish, /^\/api\/unlock\/finish\?co=/);
+  b.jar.clear();
+  pay(c.amount);
+  clock = START + MIN;
+  assert.equal((await b.send("POST", "claim", { body: { item: "post-1", co: c.token } })).json.state, "paid");
+  assert.equal(await hasPass(SECRET, b.jar.get(PASS_COOKIE)!.value, "post-1", clock), true);
+});
+
+test("a finish-later link in another browser: it only asks, and a pasted hash unlocks there", async () => {
+  clock = START;
+  const b = browser();
+  const c = (await b.send("POST", "start", { body: { offer: await offer("post-1") } })).json.checkout;
   const hash = randomHash();
+  // Received long ago, with more than 50 payments after it: no list shows it.
   node.blocks.set(hash, sendBlock(address, c.amount, START + 5 * MIN));
 
   clock = START + 3 * 3600_000;
   const phone = browser();
-  const went = await phone.send("GET", "finish", { query: `${c.finish.slice(c.finish.indexOf("?"))}&to=${encodeURIComponent("/posts/post-1")}` });
-  assert.equal(went.status, 303);
-  assert.equal(went.headers.get("location"), "/posts/post-1");
-  assert.equal(went.headers.get("referrer-policy"), "no-referrer");
-  assert.equal((await phone.send("POST", "claim", { body: { item: "post-1" } })).json.state, "waiting");
-  assert.equal((await phone.send("POST", "claim", { body: { item: "post-1", hash } })).json.state, "paid");
+  const asked = await phone.send("POST", "claim", { body: { item: "post-1", co: c.token } });
+  assert.equal(asked.json.state, "waiting");
+  assert.equal(asked.json.checkout, null, "a link's checkout is never a pay step");
+  assert.equal(phone.jar.size, 0, "a link's checkout never enters the cookie");
+  assert.equal((await phone.send("POST", "claim", { body: { item: "post-1", co: c.token, hash } })).json.state, "paid");
   assert.equal(await hasPass(SECRET, phone.jar.get(PASS_COOKIE)!.value, "post-1", clock), true);
+  assert.equal(phone.jar.has(CHECKOUT_COOKIE), false);
 });
 
-test("the finish-later link goes only to a path of this site", async () => {
+test("a link from another person cannot remove, replace or stand in for the reader's open checkout", async () => {
+  clock = START;
+  const stranger = browser();
+  const planted: string[] = [];
+  for (let i = 0; i < 12; i++) {
+    clock = START + i * 1000 + 16 * MIN * i;
+    planted.push((await stranger.send("POST", "start", { body: { offer: await offer("post-1") } })).json.checkout.token);
+  }
+  clock = START + 4 * 3600_000;
+  const reader = browser();
+  const own = (await reader.send("POST", "start", { body: { offer: await offer("post-1") } })).json.checkout;
+  const before = reader.jar.get(CHECKOUT_COOKIE)!.value;
+
+  // The reader opens the stranger's links, one after the other, and a "chain" of them in one text.
+  for (const co of [...planted, planted.join("~")]) {
+    const r = await reader.send("POST", "claim", { body: { item: "post-1", co } });
+    assert.notEqual(r.json.state, "paid");
+    assert.equal(r.headers.get("set-cookie"), null);
+    assert.equal(r.json.checkout?.id ?? own.id, own.id, "the pay step stays the reader's own");
+  }
+  assert.equal(reader.jar.get(CHECKOUT_COOKIE)!.value, before, "the reader's cookie is as it was");
+
+  // A new start still gives the reader's own checkout, not a planted one.
+  const again = (await reader.send("POST", "start", { body: { offer: await offer("post-1") } })).json.checkout;
+  assert.equal(again.id, own.id);
+  assert.equal(again.amount, own.amount);
+
+  // The reader pays the own amount and gets the pass. The stranger's checkouts stay unpaid.
+  pay(own.amount);
+  assert.equal((await reader.send("POST", "claim", { body: { item: "post-1", co: own.token } })).json.state, "paid");
+  assert.equal((await stranger.send("POST", "claim", { body: { item: "post-1", co: planted.at(-1) } })).json.state, "waiting");
+  assert.equal(stranger.jar.has(PASS_COOKIE), false);
+});
+
+test("a link gives no pass without the block that fits its own checkout", async () => {
+  clock = START;
+  const a = browser();
   const b = browser();
-  for (const to of ["https://evil.example/", "//evil.example", "/\\evil.example", "javascript:alert(1)", "evil"]) {
-    const r = await b.send("GET", "finish", { query: `?co=junk&to=${encodeURIComponent(to)}` });
-    assert.equal(r.headers.get("location"), "/", to);
+  const ca = (await a.send("POST", "start", { body: { offer: await offer("post-1") } })).json.checkout;
+  const cb = (await b.send("POST", "start", { body: { offer: await offer("post-1") } })).json.checkout;
+  const hash = pay(ca.amount);
+  clock = START + MIN;
+  const third = browser();
+  assert.equal((await third.send("POST", "claim", { body: { item: "post-1", co: cb.token } })).json.state, "waiting");
+  assert.equal((await third.send("POST", "claim", { body: { item: "post-1", co: cb.token, hash } })).json.state, "wrong");
+  // A link for another item opens nothing here.
+  assert.equal((await third.send("POST", "claim", { body: { item: "post-2", co: ca.token } })).json.state, "expired");
+  assert.equal(third.jar.size, 0);
+});
+
+test("a GET changes nothing: there is no route that puts a checkout into a browser", async () => {
+  const b = browser();
+  for (const action of ["finish", "claim", "start"]) {
+    const r = await b.send("GET", action, { query: "?co=x&to=/api/unlock/finish" });
+    assert.equal(r.status, 404, action);
     assert.equal(r.headers.get("set-cookie"), null);
   }
+});
+
+test("forged texts use no count and reset no count; a true checkout is counted by its id", async () => {
+  clock = START + 9 * 3600_000;
+  const b = browser();
+  const c = (await b.send("POST", "start", { body: { offer: await offer("post-7") } })).json.checkout;
+  node.calls.length = 0;
+  for (let i = 0; i < 6000; i += 100) assert.equal((await b.send("POST", "claim", { body: { item: "post-7", co: `forged-${i}.${"x".repeat(43)}` } })).json.state, "expired");
+  assert.equal(node.calls.length, 0, "a forged text makes no call to the node");
+  let slow = 0;
+  for (let i = 0; i < 25; i++) if ((await b.send("POST", "claim", { body: { item: "post-7", co: c.token } })).status === 429) slow++;
+  assert.equal(slow, 5, "20 questions in a minute for one checkout, then 'slow'");
+  clock += 61_000;
+  assert.equal((await b.send("POST", "claim", { body: { item: "post-7", co: c.token } })).json.state, "waiting");
 });
 
 test("a request from another site, or one that is not JSON, is refused before anything else", async () => {
@@ -177,7 +267,7 @@ test("a node that is down answers 'busy' and sets no pass", async () => {
   const c = (await b.send("POST", "start", { body: { offer: await offer("post-9") } })).json.checkout;
   pay(c.amount);
   node.down = 500;
-  const r = await b.send("POST", "claim", { body: { item: "post-9", id: c.id } });
+  const r = await b.send("POST", "claim", { body: { item: "post-9", co: c.token } });
   node.down = null;
   assert.equal(r.status, 503);
   assert.equal(r.json.state, "busy");
@@ -191,7 +281,6 @@ test("with a setting absent or wrong, nothing starts and the status names the se
   assert.deepEqual((await b.send("GET", "status")).json, { ready: false, settings: ["NANO_ADDRESS"] });
   assert.equal((await b.send("POST", "start", { body: { offer: await offer("post-1") } })).status, 503);
   assert.equal((await b.send("POST", "claim", { body: { item: "post-1" } })).status, 503);
-  assert.equal((await b.send("GET", "finish", { query: "?co=x" })).status, 503);
   config = keep;
   assert.deepEqual((await b.send("GET", "status")).json, { ready: true });
 });

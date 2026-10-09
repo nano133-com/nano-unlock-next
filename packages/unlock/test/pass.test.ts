@@ -7,6 +7,7 @@ import { sign, verify, SECRET_MIN } from "../src/signed.ts";
 import { PASS_COOKIE_BYTES, PASS_SECONDS, addPass, hasPass, latestEnd, makePass } from "../src/pass.ts";
 import { readConfig } from "../src/config.ts";
 import { nodeProblem } from "../src/node.ts";
+import { xnoUsdRate } from "../src/rate.ts";
 import { randomAddress } from "./helpers.ts";
 
 const SECRET = "test-only-secret-0123456789-abcdefghij-KLMNOP";
@@ -139,4 +140,27 @@ test("the settings: no address, a mistyped address, a short secret or a test nod
   assert.deepEqual(problems({ ...good, NANO_NODE_URL_2: "https://NODE.nano133.com/other" }), ["NANO_NODE_URL_2"], "the same node twice");
   assert.deepEqual(problems({ ...good, NANO_NODE_URL_2: "https://rpc.example.org/" }), []);
   assert.equal(nodeProblem("https://rpc.nano.to"), null);
+});
+
+test("the rate needs two feeds that agree: one feed alone, or one far from the others, sets no price", async () => {
+  // The 3 feeds answer in their own forms; `null` is a feed that fails.
+  const feeds = (coingecko: number | null, kraken: number | null, kucoin: number | null) =>
+    (async (url: string | URL | Request) => {
+      const u = String(url);
+      const v = u.includes("coingecko") ? coingecko : u.includes("kraken") ? kraken : kucoin;
+      if (v === null) throw new Error("down");
+      const body = u.includes("coingecko") ? { nano: { usd: v } } : u.includes("kraken") ? { result: { NANOUSD: { c: [String(v)] } } } : { data: { price: String(v) } };
+      return new Response(JSON.stringify(body));
+    }) as typeof fetch;
+  assert.equal((await xnoUsdRate(feeds(0.9, 0.91, 0.92)))?.usd, 0.91);
+  assert.equal((await xnoUsdRate(feeds(0.9, 0.91, null)))?.usd, 0.91);
+  assert.equal(await xnoUsdRate(feeds(0.9, null, null)), null, "one feed alone");
+  assert.equal(await xnoUsdRate(feeds(null, null, null)), null);
+  assert.equal(await xnoUsdRate(feeds(0.9, 9, null)), null, "two feeds that do not agree");
+  // One wrong feed (10 times too high, which would make the price 10 times too low) is left out.
+  const r = await xnoUsdRate(feeds(0.9, 0.91, 9));
+  assert.equal(r?.usd, 0.91);
+  assert.deepEqual(r?.sources, ["coingecko", "kraken"]);
+  assert.equal((await xnoUsdRate(feeds(0.09, 0.9, 0.91)))?.usd, 0.91);
+  assert.equal(await xnoUsdRate(feeds(1000, 0.001, 0.9)), null, "outside the sane range");
 });

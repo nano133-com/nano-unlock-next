@@ -12,7 +12,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation.js";
 import qrcode from "qrcode-generator";
 
-type Checkout = { id: string; item: string; to: string; amount: string; xno: string; uri: string; payUntil: number; finish: string };
+type Checkout = { id: string; item: string; to: string; amount: string; xno: string; uri: string; payUntil: number; token: string };
 type Answer = { state?: string; error?: string; now?: number; checkout?: Checkout | null };
 
 type Step =
@@ -24,6 +24,26 @@ type Step =
   | { name: "stopped"; message: string };
 
 const POLL_MS = 5000;
+/** Each fifth question also covers the browser's older checkouts of the item: a wallet may still hold an old amount. */
+const ALL_EACH = 5;
+/** The "finish later" link is the page's own address, then "#nano-unlock=" and the signed checkout. */
+const LINK_MARK = "#nano-unlock=";
+
+let fromLink: string | null | undefined;
+/**
+ * The signed checkout of a "finish later" link, read once from the address and then taken out of it. Opening
+ * such a link changes nothing by itself: the page only asks the site if THAT checkout is paid.
+ */
+function linkToken(): string | null {
+  if (fromLink !== undefined) return fromLink;
+  fromLink = null;
+  if (typeof location !== "undefined" && location.hash.startsWith(LINK_MARK)) {
+    const token = location.hash.slice(LINK_MARK.length);
+    if (/^[A-Za-z0-9_.-]{20,1024}$/.test(token)) fromLink = token;
+    history.replaceState(null, "", location.pathname + location.search);
+  }
+  return fromLink;
+}
 
 async function post(action: "start" | "claim", body: unknown): Promise<Answer> {
   try {
@@ -67,6 +87,7 @@ function Copy({ text, label }: { text: string; label: string }) {
 }
 
 const WORDS: Record<string, string> = {
+  slow: "Many readers pay right now. The check goes on: wait a moment.",
   wrong: "That block is not this payment: it has another amount or another address.",
   invalid: "That is not a block hash. A hash has 64 characters, 0 to 9 and A to F.",
   unknown: "The network does not know that block yet. Wait a moment and try again.",
@@ -82,6 +103,9 @@ export function UnlockButton({ item, price, offer }: { item: string; price: stri
   const [, setTick] = useState(0);
   /** A start that waits for a fresh page (the offer was older than 15 minutes). */
   const retry = useRef(false);
+  /** The signed checkout that this page asks about: its own open one, the last one that ended, or a link's. */
+  const mine = useRef<string | null>(null);
+  const polls = useRef(0);
   const siteNow = () => Date.now() + skew.current;
   const learn = (a: Answer) => {
     if (typeof a.now === "number") skew.current = a.now - Date.now();
@@ -98,7 +122,10 @@ export function UnlockButton({ item, price, offer }: { item: string; price: stri
       setStep({ name: "starting" });
       const a = await post("start", { offer: withOffer });
       learn(a);
-      if (a.state === "open" && a.checkout) return setStep({ name: "pay", checkout: a.checkout, note: null, pending: false });
+      if (a.state === "open" && a.checkout) {
+        mine.current = a.checkout.token;
+        return setStep({ name: "pay", checkout: a.checkout, note: null, pending: false });
+      }
       if (a.state === "stale" && !retry.current) {
         retry.current = true;
         return router.refresh();
@@ -118,18 +145,32 @@ export function UnlockButton({ item, price, offer }: { item: string; price: stri
     }
   }, [offer, start]);
 
-  /** One question to the site. `id` names the open checkout; `hash` is a block that the reader pasted. */
+  /**
+   * One question to the site. It always carries this page's own signed checkout (`co`), so a lost or changed
+   * cookie cannot hide a payment. `all` adds the browser's older checkouts of the item; `hash` is a block that
+   * the reader pasted.
+   */
   const check = useCallback(
-    async (o: { id?: string; hash?: string; quiet?: boolean }) => {
-      const a = await post("claim", { item, id: o.id, hash: o.hash });
+    async (o: { all?: boolean; hash?: string; quiet?: boolean; link?: boolean }) => {
+      const a = await post("claim", { item, co: mine.current ?? undefined, all: o.all === true, hash: o.hash });
       learn(a);
       if (a.state === "paid") return paid();
+      // A link's checkout is for another item, forged or over: this paid part stays as it is.
+      if (o.link && a.state === "expired") {
+        mine.current = null;
+        return;
+      }
       const note = a.error ?? (a.state ? (WORDS[a.state] ?? null) : null);
       setStep((s) => {
         if (s.name === "pay") return { ...s, pending: a.state === "pending", note: o.quiet && !a.error ? (a.state === "disagree" ? WORDS.disagree! : null) : note };
         if (s.name === "paid") return s;
         // A page that just opened, or the ended view: show the open checkout if the browser has one.
-        if (a.checkout && siteNow() < a.checkout.payUntil) return { name: "pay", checkout: a.checkout, note, pending: a.state === "pending" };
+        if (a.checkout && siteNow() < a.checkout.payUntil && !o.link) {
+          mine.current = a.checkout.token;
+          return { name: "pay", checkout: a.checkout, note, pending: a.state === "pending" };
+        }
+        // A "finish later" link never becomes a pay step: it shows only if its own checkout is paid or not.
+        if (o.link) return { name: "ended", note: a.state === "pending" ? "Your payment is seen. The network confirms it now: check again in a moment." : (note ?? "No payment is seen yet for this link.") };
         if (s.name === "ended") return { name: "ended", note: note ?? (a.state === "waiting" || a.state === "none" ? "No payment is seen yet." : a.state === "pending" ? "Your payment is seen. The network confirms it now: check again in a moment." : null) };
         return s;
       });
@@ -137,9 +178,12 @@ export function UnlockButton({ item, price, offer }: { item: string; price: stri
     [item, paid],
   );
 
-  // On load: does this browser have a checkout for this item? (With none, the site asks no node.)
+  // On load: a "finish later" link's checkout, or else this browser's own checkouts of the item. (With none,
+  // the site asks no node.)
   useEffect(() => {
-    void check({ quiet: true });
+    const token = linkToken();
+    if (token) mine.current = token;
+    void check({ all: !token, quiet: true, link: !!token });
   }, [check]);
 
   // The pay step: ask every 5 seconds, count down, and end after the 15 minutes.
@@ -149,7 +193,7 @@ export function UnlockButton({ item, price, offer }: { item: string; price: stri
     const timer = setInterval(() => {
       if (siteNow() >= open.payUntil) return setStep({ name: "ended", note: null });
       setTick((t) => t + 1);
-      if (document.visibilityState === "visible") void check({ id: open.id, quiet: true });
+      if (document.visibilityState === "visible") void check({ all: ++polls.current % ALL_EACH === 0, quiet: true });
     }, POLL_MS);
     return () => {
       clearInterval(timer);
@@ -163,7 +207,7 @@ export function UnlockButton({ item, price, offer }: { item: string; price: stri
 
   if (step.name === "pay" && open && qr) {
     const left = Math.max(0, Math.ceil((open.payUntil - siteNow()) / 60_000));
-    const finish = typeof location === "undefined" ? "" : `${location.origin}${open.finish}&to=${encodeURIComponent(location.pathname)}`;
+    const finish = typeof location === "undefined" ? "" : `${location.origin}${location.pathname}${location.search}${LINK_MARK}${open.token}`;
     return (
       <div className="nu-pay">
         <p className="nu-lead">Pay with a Nano wallet. Scan the code, or open your wallet on this device.</p>
@@ -204,7 +248,7 @@ export function UnlockButton({ item, price, offer }: { item: string; price: stri
           <p>A payment counts for 24 hours. Paste the payment&apos;s block hash from your wallet:</p>
           <div className="nu-row">
             <input className="nu-input" value={hash} onChange={(e) => setHash(e.target.value)} placeholder="64 characters" aria-label="Block hash" autoComplete="off" spellCheck={false} />
-            <button type="button" className="nu-copy" onClick={() => void check({ id: open.id, hash })}>
+            <button type="button" className="nu-copy" onClick={() => void check({ hash })}>
               Check
             </button>
           </div>
@@ -221,12 +265,23 @@ export function UnlockButton({ item, price, offer }: { item: string; price: stri
     return (
       <div className="nu-act">
         <p className="nu-lead">The 15 minutes of this payment request are over. If you paid, your payment still counts for 24 hours.</p>
-        <button type="button" className="nu-button nu-quiet" onClick={() => void check({})}>
+        <button type="button" className="nu-button nu-quiet" onClick={() => void check({ all: true })}>
           I paid: check again
         </button>
         <button type="button" className="nu-button" onClick={() => void start(offer)}>
           Start again
         </button>
+        {mine.current && (
+          <details className="nu-more">
+            <summary>Paste the payment&apos;s block hash</summary>
+            <div className="nu-row">
+              <input className="nu-input" value={hash} onChange={(e) => setHash(e.target.value)} placeholder="64 characters" aria-label="Block hash" autoComplete="off" spellCheck={false} />
+              <button type="button" className="nu-copy" onClick={() => void check({ hash })}>
+                Check
+              </button>
+            </div>
+          </details>
+        )}
         {step.note && (
           <p className="nu-error" role="status">
             {step.note}

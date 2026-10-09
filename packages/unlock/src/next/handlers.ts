@@ -1,7 +1,7 @@
 // The route handlers: plain Web `Request` in, `Response` out, with the cookies read and written by hand. So
 // they use nothing of Next.js, and a test can call them with a mock node.
 
-import { CHECKOUT_COOKIE, LIFE_MS, addCheckout, claimCheckout, memoryLimit, openCheckout, readCheckouts, startCheckout, type ClaimResult, type OpenCheckout } from "../checkout.ts";
+import { CHECKOUT_COOKIE, LIFE_MS, claimCheckout, memoryLimit, openCheckout, readCheckouts, startCheckout, type ClaimResult, type OpenCheckout } from "../checkout.ts";
 import { readConfig, type Config, type Settings } from "../config.ts";
 import { nodeRpc, type Rpc } from "../node.ts";
 import { PASS_COOKIE, addPass, isItem, latestEnd } from "../pass.ts";
@@ -49,15 +49,25 @@ function fromOtherSite(request: Request): Response | null {
 /** The open checkouts: sent only to this route, never to a page. */
 const checkoutCookie = (value: string) => setCookie(CHECKOUT_COOKIE, value, { path: "/api/unlock", maxAge: LIFE_MS / 1000 });
 
-/** What the reader's page gets about an open checkout: the public facts and the "finish later" link's query. */
-const forPage = (c: OpenCheckout) => ({ id: c.id, item: c.item, to: c.to, amount: c.amount, xno: c.xno, uri: c.uri, payUntil: c.payUntil, finish: `/api/unlock/finish?co=${encodeURIComponent(c.token)}` });
+/** What the reader's page gets about an open checkout: the public facts and the signed checkout itself. */
+const forPage = (c: OpenCheckout) => ({ id: c.id, item: c.item, to: c.to, amount: c.amount, xno: c.xno, uri: c.uri, payUntil: c.payUntil, token: c.token });
 
 // Best-effort limits in this instance's memory (see `memoryLimit`): a slow-down, not a true rate limit.
 const startsAllowed = memoryLimit(300, 60_000);
-const claimsAllowed = memoryLimit(1200, 60_000);
-const claimsForOne = memoryLimit(30, 60_000);
-/** A page that opens with no named checkout looks at this many of the item's checkouts, the newest first. */
-const RESUME_MOST = 3;
+/**
+ * Questions to the node in one minute, for one instance. One question about one checkout is 2 calls to the
+ * node, and the default node allows about 120 calls a minute for one address: so the default is 50. An owner
+ * with an own node sets UNLOCK_CLAIMS_PER_MINUTE higher.
+ */
+const claimsLimit = () => {
+  const n = Number(process.env.UNLOCK_CLAIMS_PER_MINUTE);
+  return Number.isInteger(n) && n >= 1 && n <= 100_000 ? n : 50;
+};
+let claimsAllowed = memoryLimit(claimsLimit(), 60_000);
+let claimsAllowedFor = claimsLimit();
+const claimsForOne = memoryLimit(20, 60_000);
+/** One question looks at this many checkouts at most: the page's own, then the browser's newest of the item. */
+const ASK_MOST = 3;
 
 const BUSY = "The network check is busy. Nothing is lost: try again in a moment.";
 
@@ -72,25 +82,29 @@ async function start(request: Request, settings: Settings, deps: Deps) {
 
 async function claim(request: Request, settings: Settings, deps: Deps) {
   const now = deps.now();
-  const body = (await request.json().catch(() => null)) as { item?: unknown; id?: unknown; hash?: unknown; co?: unknown } | null;
+  const body = (await request.json().catch(() => null)) as { item?: unknown; hash?: unknown; co?: unknown; all?: unknown } | null;
   const item = body?.item;
   if (!isItem(item)) return json(400, { error: "no item" });
   const hash = typeof body?.hash === "string" && body.hash ? body.hash.trim() : null;
   const cookie = cookieOf(request, CHECKOUT_COOKIE);
 
-  // Which signed checkouts to look at: the one a "finish later" link carried, the one the page names, or
-  // (a page that just opened) the item's newest ones in this browser.
-  let tokens: string[];
-  if (typeof body?.co === "string" && body.co) tokens = [body.co];
-  else {
-    const mine = (await readCheckouts(settings.secret, cookie, now)).filter((c) => c.item === item);
-    tokens = (typeof body?.id === "string" ? mine.filter((c) => c.id === body.id) : mine.slice(0, RESUME_MOST)).map((c) => c.token);
-  }
+  // Which signed checkouts to look at. First the one that the page sends (`co`): the page holds its own
+  // checkout, and a "finish later" link carries one, so a lost or changed cookie cannot hide a payment. Then,
+  // for a page that just opened or that asks for all, this browser's newest checkouts of the item: a wallet
+  // may have paid an older amount. Each is checked by its signature here, before any count or node call; a
+  // checkout from `co` is only looked at, and never enters the cookie.
+  const sent = typeof body?.co === "string" && body.co ? (await readCheckouts(settings.secret, body.co, now)).filter((c) => c.item === item).slice(0, 1) : [];
+  // A `co` that is forged or over gets no other checkout in its place.
+  const mine = !body?.co || body?.all === true ? (await readCheckouts(settings.secret, cookie, now)).filter((c) => c.item === item) : [];
+  const asked = [...sent, ...mine.filter((c) => !sent.some((s) => s.id === c.id))].slice(0, ASK_MOST);
   const open = await openCheckout(settings, cookie, item, now);
   const answer = (r: { state: string }) => json(200, { ...r, now, checkout: open ? forPage(open) : null });
-  // No checkout in this browser: nothing to ask the node.
-  if (!tokens.length) return answer({ state: "none" });
-  if (!claimsAllowed("all") || !claimsForOne(tokens[0]!.slice(-32))) return json(429, { error: "Too many checks. Wait a minute." });
+  // No valid checkout: nothing to ask the node. (A `co` that is forged or over is "expired" for the page.)
+  if (!asked.length) return answer({ state: body?.co ? "expired" : "none" });
+  if (claimsAllowedFor !== claimsLimit()) [claimsAllowed, claimsAllowedFor] = [memoryLimit(claimsLimit(), 60_000), claimsLimit()];
+  // Counted by the signed checkout's own id, so a forged text can neither use a count nor reset the counts.
+  if (!claimsForOne(asked[0]!.id, now) || !asked.every(() => claimsAllowed("all", now))) return json(429, { state: "slow", error: "Many readers pay right now. The check goes on: wait a moment." });
+  const tokens = asked.map((c) => c.token);
 
   const rpcs = settings.nodes.map((url) => deps.rpc(url));
   let last: ClaimResult = { state: "waiting" };
@@ -115,30 +129,18 @@ async function claim(request: Request, settings: Settings, deps: Deps) {
   return answer(last);
 }
 
-/**
- * The "finish later" link: puts its signed checkout into this browser, then goes to the page with a clean
- * address. The checkout holds no secret, and it unlocks nothing until its own payment is on the network.
- */
-async function finish(request: Request, settings: Settings, deps: Deps) {
-  const url = new URL(request.url);
-  const to = url.searchParams.get("to") ?? "/";
-  // A path on this site only: one leading slash, no scheme, no backslash.
-  const path = /^\/(?![/\\])[^\\]*$/.test(to) ? to : "/";
-  const next = await addCheckout(settings.secret, cookieOf(request, CHECKOUT_COOKIE), url.searchParams.get("co") ?? "", deps.now());
-  return new Response(null, { status: 303, headers: { location: path, "cache-control": "no-store", "referrer-policy": "no-referrer", ...(next ? { "set-cookie": checkoutCookie(next) } : {}) } });
-}
-
 type Context = { params: Promise<{ action?: string }> };
 
 /** The route handlers, with the given outside parts. The package's own `handlers()` uses the real ones. */
 export function handlersWith(given: Partial<Deps> = {}) {
   const deps: Deps = { ...REAL, ...given };
-  async function GET(request: Request, context: Context) {
+  // A GET changes nothing: no cookie, no checkout. (The "finish later" link is the page's own address with the
+  // signed checkout after the "#"; the page reads it and asks `claim`.)
+  async function GET(_request: Request, context: Context) {
     const { action } = await context.params;
     const config = deps.config();
     // Only the names of the settings with a problem: never a value.
     if (action === "status") return json(200, config.ok ? { ready: true } : { ready: false, settings: config.problems.map((p) => p.setting) });
-    if (action === "finish") return config.ok ? finish(request, config.settings, deps) : json(503, { error: "This site is not ready to take payments yet." });
     return json(404, { error: "not found" });
   }
 
