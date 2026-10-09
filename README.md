@@ -20,6 +20,10 @@ This repository holds:
 The button copies the blog into your own Git account, asks for the two settings below, and builds the site.
 The link carries no value for a setting: you type both yourself.
 
+To deploy this whole repository (for example your fork) and not the button's copy: set the project's
+**Root Directory** to `template`. Nothing else: the blog's build first builds the local package
+(`template/scripts/build-local-package.mjs`).
+
 ## Add it to your own Next.js site
 
 Next.js 15 or 16 (App Router), Node.js 20.9 or newer.
