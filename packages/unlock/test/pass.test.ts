@@ -9,8 +9,8 @@ import { readConfig } from "../src/config.ts";
 import { nodeProblem } from "../src/node.ts";
 import { randomAddress } from "./helpers.ts";
 
-const SECRET = "s".repeat(40) + "-test-only";
-const OTHER = "o".repeat(40) + "-test-only";
+const SECRET = "test-only-secret-0123456789-abcdefghij-KLMNOP";
+const OTHER = "test-only-other-9876543210-zyxwvutsrq-ABCDEF";
 const START = Date.UTC(2026, 9, 9, 12, 0, 0);
 const DAY = 24 * 3600_000;
 
@@ -72,7 +72,7 @@ test("a signed text has an end time and is refused after it", async () => {
 });
 
 test("a short or absent secret signs nothing and checks nothing", async () => {
-  for (const secret of ["", "short", "x".repeat(SECRET_MIN - 1)]) {
+  for (const secret of ["", "short", "x".repeat(SECRET_MIN - 1), "a".repeat(64), "abcabcabc".repeat(8)]) {
     await assert.rejects(makePass(secret, { item: "post-1", cid: "c1", startedMs: START }));
     await assert.rejects(hasPass(secret, await pass("post-1"), "post-1", START));
   }
@@ -120,5 +120,7 @@ test("the settings: no address, a mistyped address, a short secret or a test nod
   for (const node of ["http://node.example.org/rpc", "https://localhost/rpc", "https://127.0.0.1/rpc", "https://10.0.0.5/rpc", "https://192.168.1.9/rpc", "https://node.local/rpc", "https://host.docker.internal/rpc", "https://nodename/rpc", "https://[::1]/rpc", "not a url"])
     assert.deepEqual(problems({ ...good, NANO_NODE_URL: node }), ["NANO_NODE_URL"], node);
   assert.deepEqual(problems({ ...good, NANO_NODE_URL_2: "http://127.0.0.1:7076" }), ["NANO_NODE_URL_2"]);
+  assert.deepEqual(problems({ ...good, NANO_NODE_URL_2: "https://NODE.nano133.com/other" }), ["NANO_NODE_URL_2"], "the same node twice");
+  assert.deepEqual(problems({ ...good, NANO_NODE_URL_2: "https://rpc.example.org/" }), []);
   assert.equal(nodeProblem("https://rpc.nano.to"), null);
 });

@@ -30,7 +30,7 @@ export function readConfig(env: Env = process.env): Config {
 
   const secret = (env.UNLOCK_SECRET ?? "").trim();
   if (!secret) problems.push({ setting: "UNLOCK_SECRET", message: "Set UNLOCK_SECRET to a long random text (32 characters or more)." });
-  else if (secretProblem(secret)) problems.push({ setting: "UNLOCK_SECRET", message: `UNLOCK_SECRET is too short. ${secretProblem(secret)}` });
+  else if (secretProblem(secret)) problems.push({ setting: "UNLOCK_SECRET", message: `UNLOCK_SECRET is not strong enough. ${secretProblem(secret)}` });
 
   const nodes: string[] = [];
   const first = (env.NANO_NODE_URL ?? "").trim() || DEFAULT_NODE;
@@ -41,6 +41,9 @@ export function readConfig(env: Env = process.env): Config {
   if (second) {
     const secondProblem = nodeProblem(second);
     if (secondProblem) problems.push({ setting: "NANO_NODE_URL_2", message: `${secondProblem} A test node cannot see a real payment.` });
+    // The same node twice would make "both must agree" an empty rule.
+    else if (!firstProblem && new URL(second).host.toLowerCase() === new URL(first).host.toLowerCase())
+      problems.push({ setting: "NANO_NODE_URL_2", message: "NANO_NODE_URL_2 is the same node as the first one. Set a different node, or remove it." });
     else nodes.push(second);
   }
   return problems.length ? { ok: false, problems } : { ok: true, settings: { address, secret, nodes } };

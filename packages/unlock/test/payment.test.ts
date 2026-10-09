@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 import { checkBlock, checkPayment } from "../src/payment.ts";
 import { isAddress } from "../src/address.ts";
 import { blake2b } from "../src/blake2b.ts";
+import { createHash } from "node:crypto";
 import { mockNode, randomAddress, randomHash, sendBlock, type MockNode } from "./helpers.ts";
 
 const AMOUNT = "28100000000000000000000734201";
@@ -40,6 +41,16 @@ const named = (hash: string) => checkBlock(node.rpc, { hash, to: owner, amount: 
 test("BLAKE2b gives the published digest of 'abc'", () => {
   const hex = Buffer.from(blake2b(new TextEncoder().encode("abc"), 64)).toString("hex");
   assert.equal(hex.slice(0, 32), "ba80a53f981c4d0d6a2797b69f12f6e9");
+});
+
+test("the address form agrees with the Nano network's: a vector from outside", () => {
+  // The address of the all-zero public key is known to every Nano tool. This file holds no address, so the
+  // test holds the SHA-256 of that address's text and compares the one that our code makes.
+  const known = "a179a8c88fe63be0dc17454075a9c3570113cff90a081aeace90d8215d7b989b";
+  const zero = randomAddress(new Uint8Array(32));
+  assert.equal(createHash("sha256").update(zero).digest("hex"), known);
+  assert.equal(isAddress(zero), true);
+  assert.equal(isAddress(zero.slice(0, -1) + "q"), false);
 });
 
 test("an address with one changed character is refused", () => {

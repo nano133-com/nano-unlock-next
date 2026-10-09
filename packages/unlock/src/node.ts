@@ -13,6 +13,8 @@ export function nodeRpc(url: string, fetchFn: typeof fetch = globalThis.fetch): 
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(timeoutMs),
       cache: "no-store",
+      // A node address that passed `nodeProblem` must not send the call on to plain http or a private host.
+      redirect: "error",
     });
     if (!res.ok) throw new Error(`the node answered ${res.status}`);
     const json = (await res.json()) as { error?: unknown };

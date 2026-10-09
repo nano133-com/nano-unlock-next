@@ -29,8 +29,14 @@ function unb64url(text: string): Uint8Array | null {
   }
 }
 
-export const secretProblem = (secret: unknown): string | null =>
-  typeof secret !== "string" || secret.length < SECRET_MIN ? `The secret must be ${SECRET_MIN} characters or longer.` : null;
+/** A secret needs this many different characters: "aaaa…" is long and still no secret. */
+const SECRET_DISTINCT = 10;
+
+export function secretProblem(secret: unknown): string | null {
+  if (typeof secret !== "string" || secret.length < SECRET_MIN) return `The secret must be ${SECRET_MIN} characters or longer.`;
+  if (new Set(secret).size < SECRET_DISTINCT) return "The secret must be random: it repeats too few characters.";
+  return null;
+}
 
 const hmacKey = (raw: Uint8Array, usages: KeyUsage[]) => crypto.subtle.importKey("raw", raw as BufferSource, { name: "HMAC", hash: "SHA-256" }, false, usages);
 
