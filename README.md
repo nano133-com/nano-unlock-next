@@ -32,6 +32,16 @@ The button copies the blog into your own Git account and makes a Cloudflare Work
 [OpenNext adapter](https://opennext.js.org/cloudflare). It asks for the two secrets, `NANO_ADDRESS` and
 `UNLOCK_SECRET`; the link carries no value. A live one: <https://nano-unlock-blog.nano133.workers.dev>.
 
+Three things to know about the button:
+
+- **The first time,** Cloudflare has no connection to your GitHub account. "New GitHub connection" makes one,
+  but Cloudflare then leaves the button's form and shows "Select a repository". Open the button's link again:
+  your Git account now shows, and the form works.
+- **The project name** on the form is `nano-unlock-blog`. A second blog in the same account needs another
+  name ("A project with that name already exists").
+- **The form hides `NANO_ADDRESS` as you type it** (dots), like a secret, although an address is public. Later
+  the Worker's settings show its name only, not its value. Keep a note of which address you used.
+
 By hand, in a copy of `template/`:
 
 ```sh
