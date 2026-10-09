@@ -7,7 +7,7 @@ import { sign, verify, SECRET_MIN } from "../src/signed.ts";
 import { PASS_COOKIE_BYTES, PASS_SECONDS, addPass, hasPass, latestEnd, makePass } from "../src/pass.ts";
 import { readConfig } from "../src/config.ts";
 import { nodeProblem } from "../src/node.ts";
-import { xnoUsdRate } from "../src/rate.ts";
+import { cachedRate, forgetRateForTests, xnoUsdRate, type SharedCache } from "../src/rate.ts";
 import { randomAddress } from "./helpers.ts";
 
 const SECRET = "test-only-secret-0123456789-abcdefghij-KLMNOP";
@@ -163,4 +163,58 @@ test("the rate needs two feeds that agree: one feed alone, or one far from the o
   assert.deepEqual(r?.sources, ["coingecko", "kraken"]);
   assert.equal((await xnoUsdRate(feeds(0.09, 0.9, 0.91)))?.usd, 0.91);
   assert.equal(await xnoUsdRate(feeds(1000, 0.001, 0.9)), null, "outside the sane range");
+});
+
+test("the rate is kept in the platform's cache too, and a kept rate is believed only when it is sane and fresh", async () => {
+  const feeds = (v: number | null, count: { n: number }) =>
+    (async (url: string | URL | Request) => {
+      count.n++;
+      if (v === null) throw new Error("down");
+      const u = String(url);
+      const body = u.includes("coingecko") ? { nano: { usd: v } } : u.includes("kraken") ? { result: { NANOUSD: { c: [String(v)] } } } : { data: { price: String(v) } };
+      return new Response(JSON.stringify(body));
+    }) as typeof fetch;
+  const store = new Map<string, string>();
+  const cache: SharedCache = { match: async (k) => (store.has(k) ? new Response(store.get(k)) : undefined), put: async (k, r) => void store.set(k, await r.text()) };
+  const T = Date.UTC(2026, 9, 9, 12, 0, 0);
+  const calls = { n: 0 };
+
+  // A first instance asks the feeds and keeps the rate in the shared cache.
+  forgetRateForTests();
+  assert.equal((await cachedRate(feeds(0.9, calls), T, cache))?.usd, 0.9);
+  assert.equal(calls.n, 3);
+  assert.equal(store.size, 1);
+  // A new instance (empty memory) takes it from there: no call to a feed.
+  forgetRateForTests();
+  assert.equal((await cachedRate(feeds(0.5, calls), T + 60_000, cache))?.usd, 0.9);
+  assert.equal(calls.n, 3);
+  // After 5 minutes the kept rate is too old: the feeds are asked again.
+  forgetRateForTests();
+  assert.equal((await cachedRate(feeds(0.8, calls), T + 6 * 60_000, cache))?.usd, 0.8);
+  assert.equal(calls.n, 6);
+
+  // A kept value that is not sane, from the future, or not a rate at all is not believed.
+  const [key] = [...store.keys()] as [string];
+  for (const bad of [{ usd: 5000, at: T }, { usd: 0.000001, at: T }, { usd: "0.9", at: T }, { usd: 0.9, at: T + 10 * 60_000 }, { usd: 0.9 }, "junk"]) {
+    store.set(key, JSON.stringify(bad));
+    forgetRateForTests();
+    const had: number = calls.n;
+    assert.equal((await cachedRate(feeds(0.7, calls), T, cache))?.usd, 0.7, JSON.stringify(bad));
+    assert.equal(calls.n, had + 3);
+  }
+  // A cache that fails changes nothing.
+  const broken: SharedCache = {
+    match: async () => {
+      throw new Error("no cache");
+    },
+    put: async () => {
+      throw new Error("no cache");
+    },
+  };
+  forgetRateForTests();
+  assert.equal((await cachedRate(feeds(0.6, calls), T, broken))?.usd, 0.6);
+  // With every feed down and nothing kept: no rate, so no checkout starts.
+  forgetRateForTests();
+  assert.equal(await cachedRate(feeds(null, calls), T, null), null);
+  forgetRateForTests();
 });

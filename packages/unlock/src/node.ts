@@ -13,8 +13,11 @@ export function nodeRpc(url: string, fetchFn: typeof fetch = globalThis.fetch): 
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(timeoutMs),
       cache: "no-store",
-      // A node address that passed `nodeProblem` must not send the call on to plain http or a private host.
-      redirect: "error",
+      // A node address that passed `nodeProblem` must not send the call on to plain http or a private host:
+      // a redirect is never followed. "manual" and not "error", because the Cloudflare Workers runtime refuses
+      // the value "error". With "manual" the redirect itself is the answer (a 3xx status, or status 0 in a
+      // browser), and the next line refuses it as it refuses every answer that is not a success.
+      redirect: "manual",
     });
     if (!res.ok) throw new Error(`the node answered ${res.status}`);
     const json = (await res.json()) as { error?: unknown };

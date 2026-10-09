@@ -36,13 +36,48 @@ const FRESH_MS = 5 * 60_000;
 const LAST_GOOD_MS = 24 * 3600_000;
 let kept: { rate: Rate; at: number } | null = null;
 
+/** The part of a platform cache (the Cache API) that the rate uses. */
+export type SharedCache = { match: (key: string) => Promise<Response | undefined>; put: (key: string, value: Response) => Promise<unknown> };
+/** A name for the kept rate. It is a key only: nothing is ever fetched from it. */
+const SHARED_KEY = "https://nano-unlock.invalid/xno-usd-rate/v1";
+/**
+ * The platform's own cache, where one exists (`caches.default` on Cloudflare Workers). There an instance lives
+ * for a short time, so a rate in memory alone would make most requests ask the 3 feeds again.
+ */
+const platformCache = (): SharedCache | null => (globalThis as { caches?: { default?: SharedCache } }).caches?.default ?? null;
+
+/** A rate from the shared cache: believed only when it is in the sane range and not older than 5 minutes. */
+async function sharedRate(cache: SharedCache, now: number): Promise<{ rate: Rate; at: number } | null> {
+  try {
+    const j = (await (await cache.match(SHARED_KEY))?.json()) as { usd?: unknown; sources?: unknown; at?: unknown } | undefined;
+    if (!j || typeof j.usd !== "number" || typeof j.at !== "number" || !(j.usd >= SANE.min && j.usd <= SANE.max) || !(now - j.at >= 0 && now - j.at < FRESH_MS)) return null;
+    return { rate: { usd: j.usd, sources: Array.isArray(j.sources) ? j.sources.map(String).slice(0, 8) : [] }, at: j.at };
+  } catch {
+    return null;
+  }
+}
+
 /**
  * The rate, kept for 5 minutes in this instance's memory. When every feed fails, the last good rate is used
  * for up to a day; with none, null, and no checkout can start.
  */
-export async function cachedRate(fetchFn: typeof fetch = globalThis.fetch, now = Date.now()): Promise<Rate | null> {
+export async function cachedRate(fetchFn: typeof fetch = globalThis.fetch, now = Date.now(), cache: SharedCache | null = platformCache()): Promise<Rate | null> {
   if (kept && now - kept.at < FRESH_MS) return kept.rate;
+  const shared = cache ? await sharedRate(cache, now) : null;
+  if (shared) {
+    kept = shared;
+    return kept.rate;
+  }
   const rate = await xnoUsdRate(fetchFn).catch(() => null);
-  if (rate) kept = { rate, at: now };
+  if (rate) {
+    kept = { rate, at: now };
+    // Kept for the other instances too. A failure here changes nothing: this instance has the rate.
+    await cache?.put(SHARED_KEY, new Response(JSON.stringify({ ...rate, at: now }), { headers: { "content-type": "application/json", "cache-control": `max-age=${FRESH_MS / 1000}` } })).catch(() => undefined);
+  }
   return kept && now - kept.at < LAST_GOOD_MS ? kept.rate : null;
+}
+
+/** For tests: forgets the rate in this instance's memory. */
+export function forgetRateForTests() {
+  kept = null;
 }

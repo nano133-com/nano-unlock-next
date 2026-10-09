@@ -130,6 +130,32 @@ test("a node that is down throws: nothing is unlocked", async () => {
   await assert.rejects(checkPayment([node.rpc], { to: owner, amount: AMOUNT, window }));
 });
 
+test("a node that answers with a redirect is refused, and the redirect is never followed", async () => {
+  const { createServer } = await import("node:http");
+  let followed = 0;
+  // The place that the redirect points to: a second "node" that would say "paid" for anything.
+  const target = createServer((_req, res) => {
+    followed++;
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify(sendBlock(owner, AMOUNT, START + 60_000)));
+  });
+  await new Promise<void>((done) => target.listen(0, "127.0.0.1", done));
+  const to = `http://127.0.0.1:${(target.address() as { port: number }).port}/rpc`;
+  for (const status of [301, 302, 307, 308]) {
+    const redirecting = createServer((_req, res) => {
+      res.writeHead(status, { location: to });
+      res.end();
+    });
+    await new Promise<void>((done) => redirecting.listen(0, "127.0.0.1", done));
+    const { nodeRpc } = await import("../src/node.ts");
+    const rpc = nodeRpc(`http://127.0.0.1:${(redirecting.address() as { port: number }).port}/rpc`);
+    await assert.rejects(checkBlock(rpc, { hash: randomHash(), to: owner, amount: AMOUNT, window }), new RegExp(`the node answered ${status}`), `status ${status}`);
+    await new Promise<void>((done) => redirecting.close(() => done()));
+  }
+  assert.equal(followed, 0, "no call reached the place that the redirect named");
+  await new Promise<void>((done) => target.close(() => done()));
+});
+
 test("with no hash, the search finds a waiting send and a received one, and skips an old one of the same amount", async () => {
   const old = randomHash();
   const fresh = randomHash();

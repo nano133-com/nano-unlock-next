@@ -28,9 +28,25 @@ function cookieOf(request: Request, name: string): string | undefined {
   return undefined;
 }
 
+/**
+ * Whether the cookies of this answer get `Secure`: the request came by https, or the site runs in production.
+ * Either one is enough. A host that sets no NODE_ENV (a Cloudflare Worker) is covered by the first; a host
+ * whose own proxy passes the request on as http (so the URL says http) is covered by the second. Only a
+ * plain-http development server gets a cookie with no `Secure`, which a browser would otherwise refuse there.
+ */
+export function secureCookies(request: Request): boolean {
+  let https = false;
+  try {
+    https = new URL(request.url).protocol === "https:";
+  } catch {
+    /* no URL: decided by the environment */
+  }
+  return https || (typeof process !== "undefined" && process.env?.NODE_ENV === "production");
+}
+
 /** A Set-Cookie line. The values are base64url texts joined by "~": no character needs an escape. */
-const setCookie = (name: string, value: string, o: { path: string; maxAge: number }) =>
-  `${name}=${value}; Path=${o.path}; Max-Age=${Math.floor(o.maxAge)}; HttpOnly; SameSite=Lax${process.env.NODE_ENV === "production" ? "; Secure" : ""}`;
+const setCookie = (name: string, value: string, o: { path: string; maxAge: number; secure: boolean }) =>
+  `${name}=${value}; Path=${o.path}; Max-Age=${Math.floor(o.maxAge)}; HttpOnly; SameSite=Lax${o.secure ? "; Secure" : ""}`;
 
 const json = (status: number, body: unknown, cookie?: string) =>
   Response.json(body, { status, headers: { "cache-control": "no-store", ...(cookie ? { "set-cookie": cookie } : {}) } });
@@ -47,7 +63,7 @@ function fromOtherSite(request: Request): Response | null {
 }
 
 /** The open checkouts: sent only to this route, never to a page. */
-const checkoutCookie = (value: string) => setCookie(CHECKOUT_COOKIE, value, { path: "/api/unlock", maxAge: LIFE_MS / 1000 });
+const checkoutCookie = (request: Request, value: string) => setCookie(CHECKOUT_COOKIE, value, { path: "/api/unlock", maxAge: LIFE_MS / 1000, secure: secureCookies(request) });
 
 /** What the reader's page gets about an open checkout: the public facts and the signed checkout itself. */
 const forPage = (c: OpenCheckout) => ({ id: c.id, item: c.item, to: c.to, amount: c.amount, xno: c.xno, uri: c.uri, payUntil: c.payUntil, token: c.token });
@@ -77,7 +93,7 @@ async function start(request: Request, settings: Settings, deps: Deps) {
   const result = await startCheckout(settings, { offer: body?.offer, cookie: cookieOf(request, CHECKOUT_COOKIE), xnoUsd: await deps.rate(), now: deps.now() });
   if (result.state === "stale") return json(409, { state: "stale", error: "This page is old. Load it again." });
   if (result.state === "no-rate") return json(503, { state: "no-rate", error: "The price in XNO is not known right now. Try again in a minute." });
-  return json(200, { state: "open", now: deps.now(), checkout: forPage(result.checkout) }, checkoutCookie(result.cookie));
+  return json(200, { state: "open", now: deps.now(), checkout: forPage(result.checkout) }, checkoutCookie(request, result.cookie));
 }
 
 async function claim(request: Request, settings: Settings, deps: Deps) {
@@ -120,7 +136,7 @@ async function claim(request: Request, settings: Settings, deps: Deps) {
       const passes = await addPass(settings.secret, cookieOf(request, PASS_COOKIE), r.pass, now);
       const maxAge = Math.max(60, (await latestEnd(settings.secret, passes, now)) - now / 1000);
       // "paid" is said only in the answer that also carries the pass.
-      return json(200, { state: "paid" }, setCookie(PASS_COOKIE, passes, { path: "/", maxAge }));
+      return json(200, { state: "paid" }, setCookie(PASS_COOKIE, passes, { path: "/", maxAge, secure: secureCookies(request) }));
     }
   } catch (e) {
     console.error("nano unlock: the node did not answer", (e as Error)?.message);

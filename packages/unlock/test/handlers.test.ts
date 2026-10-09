@@ -274,6 +274,37 @@ test("a node that is down answers 'busy' and sets no pass", async () => {
   assert.equal(b.jar.has(PASS_COOKIE), false);
 });
 
+test("the cookies are Secure when the request is https, also on a host with no NODE_ENV (a Worker)", async () => {
+  clock = START;
+  const flags = async (url: string, mode: string | undefined) => {
+    const keep = process.env.NODE_ENV;
+    if (mode === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = mode;
+    try {
+      const start = await route.POST(
+        new Request(`${url}/api/unlock/start`, { method: "POST", headers: { "content-type": "application/json", "sec-fetch-site": "same-origin" }, body: JSON.stringify({ offer: await offer(`secure-${Math.random().toString(36).slice(2)}`) }) }),
+        { params: Promise.resolve({ action: "start" }) },
+      );
+      const body = (await start.json()) as { checkout: { item: string; amount: string; token: string } };
+      pay(body.checkout.amount);
+      const claim = await route.POST(
+        new Request(`${url}/api/unlock/claim`, { method: "POST", headers: { "content-type": "application/json", "sec-fetch-site": "same-origin" }, body: JSON.stringify({ item: body.checkout.item, co: body.checkout.token }) }),
+        { params: Promise.resolve({ action: "claim" }) },
+      );
+      return [start.headers.get("set-cookie") ?? "", claim.headers.get("set-cookie") ?? ""].map((line) => /; Secure$/.test(line));
+    } finally {
+      if (keep === undefined) delete process.env.NODE_ENV;
+      else process.env.NODE_ENV = keep;
+    }
+  };
+  // [the checkout cookie, the pass cookie]
+  assert.deepEqual(await flags("https://blog.example", undefined), [true, true], "https, no NODE_ENV: a Worker");
+  assert.deepEqual(await flags("https://blog.example", "development"), [true, true], "https in development");
+  assert.deepEqual(await flags("http://blog.example", "production"), [true, true], "production behind a proxy that passes http on");
+  assert.deepEqual(await flags("http://localhost:3000", "development"), [false, false], "a plain-http development server");
+  assert.deepEqual(await flags("http://localhost:3000", undefined), [false, false], "plain http and no NODE_ENV");
+});
+
 test("with a setting absent or wrong, nothing starts and the status names the setting only", async () => {
   const keep = config;
   config = { ok: false, problems: [{ setting: "NANO_ADDRESS", message: "Set NANO_ADDRESS." }] };
