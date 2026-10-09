@@ -26,28 +26,32 @@ To deploy this whole repository (for example your fork) and not the button's cop
 
 ## Deploy the blog to Cloudflare
 
-[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/nano133-com/nano-unlock-next/tree/main/template)
-
-The button copies the blog into your own Git account and makes a Cloudflare Worker from it, with the
-[OpenNext adapter](https://opennext.js.org/cloudflare). It asks for the two secrets, `NANO_ADDRESS` and
-`UNLOCK_SECRET`; the link carries no value. By hand, in a copy of `template/`:
+The blog also runs as a Cloudflare Worker, with the [OpenNext adapter](https://opennext.js.org/cloudflare).
+A live one: <https://nano-unlock-blog.nano133.workers.dev>. In a copy of `template/`:
 
 ```sh
 npm install
+npx wrangler login
 npx wrangler secret put NANO_ADDRESS     # your own Nano address
 npx wrangler secret put UNLOCK_SECRET    # a long random text: openssl rand -base64 48
 npm run deploy                            # builds with OpenNext and deploys the Worker
 ```
 
-`npm run preview` runs the same Worker on your own computer (put the two settings in a file `.dev.vars` first).
+- An account with no `workers.dev` subdomain yet gets a warning and no address: register one in the dashboard
+  (Workers & Pages), then run `npm run deploy` again.
+- The secrets can be set before the first deploy.
+- `npm run preview` runs the same Worker on your own computer (put the two settings in a file `.dev.vars` first).
+
+<!-- DEPLOY TO CLOUDFLARE BUTTON: held until the default node counts each Worker's site by itself (gateway 1.0.8).
+     Its link: https://deploy.workers.cloudflare.com/?url=https://github.com/nano133-com/nano-unlock-next/tree/main/template -->
 
 What is different on Cloudflare Workers:
 
 - **Use `@nano133/unlock` 0.1.1 or newer.** Version 0.1.0 cannot check a payment on Workers.
 - **Next.js 16.3.8.** The template pins it: the OpenNext adapter (1.20.10) does not yet run Next.js 16.4.0.
-- **Set your own node if you can (`NANO_NODE_URL`).** Every Worker in the world reaches the default node
-  from one shared address, so all sites on Cloudflare share its limit of about 120 calls a minute. A paying
-  reader costs about 24 calls a minute.
+- **Set your own node on Cloudflare (`NANO_NODE_URL`).** Today every Worker in the world reaches the default
+  node from one shared address, so all sites on Cloudflare share its limit of about 120 calls a minute. A
+  paying reader costs about 24 calls a minute. The default node is enough for a test, not for a busy site.
 - **The site's own limits are weaker.** A Worker has many short instances, and each counts for itself. Use a
   Cloudflare rate limiting rule for `/api/unlock/*` if you need a true limit.
 - **The price is shared through your zone's cache** for 5 minutes (the Cache API), so the three price feeds
