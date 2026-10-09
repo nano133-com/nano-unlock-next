@@ -1,0 +1,11 @@
+{
+  "name": "nano133-unlock",
+  "private": true,
+  "workspaces": ["packages/*", "template"],
+  "scripts": {
+    "build": "npm run build -w @nano133/unlock",
+    "typecheck": "npm run typecheck -w @nano133/unlock && npm run typecheck -w nano-unlock-blog",
+    "test": "npm test -w @nano133/unlock",
+    "dev": "npm run build && npm run dev -w nano-unlock-blog"
+  }
+}
