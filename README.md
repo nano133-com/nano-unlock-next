@@ -40,7 +40,8 @@ Three things to know about the button:
 - **The project name** on the form is `nano-unlock-blog`. A second blog in the same account needs another
   name ("A project with that name already exists").
 - **The form hides `NANO_ADDRESS` as you type it** (dots), like a secret, although an address is public. Later
-  the Worker's settings show its name only, not its value. Keep a note of which address you used.
+  the Worker's settings show its name only, not its value. Check it once: press Unlock on your new site
+  and compare the address on the pay step with your wallet's Receive screen.
 
 By hand, in a copy of `template/`:
 
@@ -110,6 +111,10 @@ Next.js 15 or 16 (App Router), Node.js 20.9 or newer; on Vercel, on your own ser
    ```
 
 5. Deploy.
+
+6. **Check the address once.** Press Unlock on your own site and compare the address on the pay step (the
+   "To" field) with your wallet's Receive screen, before you tell anyone about the site. A valid address that
+   is not yours would take every payment.
 
 The paid part is rendered on the server only, for a reader who holds a pass. `unlocked` reads the request's
 cookies, so Next.js renders the page for each request and does not store one reader's page for another.

@@ -44,6 +44,10 @@ in between. The package never holds a key or any money, and it needs no database
 
 5. Deploy. Open the article, press Unlock, pay from a Nano wallet, read.
 
+6. **Check the address once.** Press Unlock on your own site and compare the address on the pay step (the
+   "To" field) with your wallet's Receive screen, before you tell anyone about the site. A valid address that
+   is not yours would take every payment.
+
 `item` is a name of your choice (letters, digits, `.` `_` `:` `-`, 80 at most). `price` is in US dollars,
 0.01 to 1000. The paid part is rendered on the server only, for a reader who holds a pass. `unlocked` reads the
 request's cookies, so Next.js renders the page for each request and stores no reader's page for another.
