@@ -62,6 +62,9 @@ There is no default address. With a setting absent or wrong, `<Unlock>` shows a 
 and the route starts no payment. A node on plain `http`, on `localhost` or on a private network is refused: it
 cannot see a real payment.
 
+On your own server behind a proxy, set `NODE_ENV=production` (`next start` does it): the cookies then get
+`Secure` also when the proxy passes the request on as http.
+
 ## How it works
 
 1. The page carries a signed offer: the item and its price. The reader cannot change the price.

@@ -50,6 +50,10 @@ What is different on Cloudflare Workers:
   reader costs about 24 calls a minute.
 - **The site's own limits are weaker.** A Worker has many short instances, and each counts for itself. Use a
   Cloudflare rate limiting rule for `/api/unlock/*` if you need a true limit.
+- **The price is shared through your zone's cache** for 5 minutes (the Cache API), so the three price feeds
+  are not asked by each short instance. Code that runs in your own zone can write that cache.
+- **With every price feed down for more than 5 minutes, no payment starts.** On a long-lived server the last
+  good price serves for a day; a Worker's instance is too short for that.
 - The settings must be **secrets** of the Worker. `wrangler.jsonc` sets `nodejs_compat` and a compatibility
   date after 2025-04-01, which the settings need.
 
@@ -106,6 +110,9 @@ cookies, so Next.js renders the page for each request and does not store one rea
 **There is no default address, and this repository holds no address.** With a setting absent or wrong, the
 blog shows a setup page that names the setting, and `<Unlock>` shows a notice in place of the button. No
 reader is asked to pay until every setting is sound.
+
+**On your own server behind a proxy, set `NODE_ENV=production`** (`next start` does it): the cookies then get
+`Secure` also when the proxy passes the request on as http.
 
 **Test nodes are refused.** A node on plain `http`, on `localhost`, on a private network or under a name with
 no dot cannot see a real payment, so the site treats it as a wrong setting.
